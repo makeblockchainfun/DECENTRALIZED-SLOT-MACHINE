@@ -1,1 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decentralized Slot Machine</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Ethers.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .reel-container {
+            height: 4.5rem; /* Increased height to properly hide the overflow */
+            width: 4rem;
+            overflow: hidden;
+            border: 4px solid #fcd34d;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+            box-sizing: border-box;
+        }
+        .reel {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            transition: transform 1.5s cubic-bezier(0.19, 1, 0.22, 1);
+        }
+        .symbol {
+            height: 4.5rem; /* Matches the new reel container height */
+            width: 4rem; /* w-16 */
+            font-size: 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="bg-gray-800 p-8 rounded-3xl shadow-2xl max-w-lg w-full">
+        <h1 class="text-4xl font-bold text-center mb-6 text-yellow-400">Decentralized Slot Machine</h1>
+        
+        <!-- Status and Balance Display -->
+        <div class="mb-6 text-center">
+            <p id="contract-balance" class="text-xl font-medium mb-2">Contract Balance: Loading...</p>
+            <p id="status-message" class="text-lg text-gray-400 min-h-[1.5rem]"></p>
+        </div>
+
+        <!-- Reels Display -->
+        <div class="flex justify-center items-center space-x-4 mb-8">
+            <div id="reel1-container" class="reel-container bg-gray-700 rounded-xl sm:w-24 md:w-32">
+                <div id="reel1" class="reel"></div>
+            </div>
+            <div id="reel2-container" class="reel-container bg-gray-700 rounded-xl sm:w-24 md:w-32">
+                <div id="reel2" class="reel"></div>
+            </div>
+            <div id="reel3-container" class="reel-container bg-gray-700 rounded-xl sm:w-24 md:w-32">
+                <div id="reel3" class="reel"></div>
+            </div>
+        </div>
+
+        <!-- Game Buttons -->
+        <div class="flex flex-col space-y-4">
+            <button id="play-button" class="w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-bold py-4 rounded-full shadow-lg transition-all duration-200 transform hover:scale-105">
+                Play (0.001 ETH)
+            </button>
+
+            <!-- Funding Section -->
+            <div class="flex items-center space-x-2">
+                <input type="number" id="fund-amount" value="0.1" step="0.001" min="0.001" class="flex-grow bg-gray-700 text-gray-100 p-3 rounded-full border border-gray-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 text-center">
+                <button id="fund-button" class="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold py-3 px-6 rounded-full shadow-lg transition-all duration-200 transform hover:scale-105">
+                    Fund
+                </button>
+            </div>
+        </div>
+
+        <!-- Owner Controls (Hidden by default) -->
+        <div id="owner-controls" class="mt-8 pt-6 border-t-2 border-gray-700 hidden">
+            <h2 class="text-xl font-bold text-center mb-4 text-red-400">Owner Controls</h2>
+            <button id="withdraw-button" class="w-full bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-bold py-4 rounded-full shadow-lg transition-all duration-200 transform hover:scale-105">
+                Withdraw All Funds
+            </button>
+        </div>
+
+        <!-- Custom Modal for Messages -->
+        <div id="modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center hidden">
+            <div class="bg-gray-800 p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center">
+                <h3 id="modal-title" class="text-2xl font-bold text-yellow-400 mb-4"></h3>
+                <p id="modal-text" class="text-gray-300 mb-6"></p>
+                <button id="modal-close" class="bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold py-2 px-6 rounded-full transition-colors duration-200">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Use a self-invoking async function to handle initial setup.
+        (async () => {
+            // --- CONFIGURATION ---
+            // REPLACE THESE VALUES after you have deployed your smart contract.
+            const contractAddress = "0x14163CAf26a36D85B201065D3a81CC7d1614AD0D"; 
+            const contractABI = [{"inputs":[],"stateMutability":"nonpayable","type":"constructor"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"funder","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"Fund","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"player","type":"address"},{"indexed":false,"internalType":"uint8","name":"reel1","type":"uint8"},{"indexed":false,"internalType":"uint8","name":"reel2","type":"uint8"},{"indexed":false,"internalType":"uint8","name":"reel3","type":"uint8"},{"indexed":false,"internalType":"uint256","name":"payoutAmount","type":"uint256"}],"name":"SpinResult","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"to","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"Withdrawal","type":"event"},{"inputs":[],"name":"PAYOUT_2X_ANY","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"PAYOUT_3X_BELL","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"PAYOUT_3X_CHERRY","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"PAYOUT_3X_DIAMOND","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"PAYOUT_3X_LEMON","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"PAYOUT_3X_SEVEN","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"fundContract","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[],"name":"nonce","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"play","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[],"name":"withdrawAll","outputs":[],"stateMutability":"nonpayable","type":"function"},{"stateMutability":"payable","type":"receive"}];
+
+            const symbols = ['🍒', '🍋', '💎', '🔔', '7️⃣'];
+            const numberOfSpins = 15; // How many times the reels "spin" before stopping
+            
+            // Define payout amounts to match the contract for message display
+            const PAYOUTS = {
+                three_sevens: ethers.utils.parseEther("1"),
+                three_diamond: ethers.utils.parseEther("0.01"),
+                three_lemon: ethers.utils.parseEther("0.005"),
+                three_bell: ethers.utils.parseEther("0.02"),
+                three_cherry: ethers.utils.parseEther("0.01"),
+                two_any: ethers.utils.parseEther("0.002")
+            };
+            
+            // --- GLOBAL VARIABLES ---
+            let provider, signer, contract;
+            const reelsContainer = [
+                document.getElementById("reel1"),
+                document.getElementById("reel2"),
+                document.getElementById("reel3")
+            ];
+            
+            const playButton = document.getElementById("play-button");
+            const fundButton = document.getElementById("fund-button");
+            const withdrawButton = document.getElementById("withdraw-button");
+            const ownerControls = document.getElementById("owner-controls");
+            const statusMessage = document.getElementById("status-message");
+            const contractBalanceEl = document.getElementById("contract-balance");
+
+            const modal = document.getElementById("modal");
+            const modalTitle = document.getElementById("modal-title");
+            const modalText = document.getElementById("modal-text");
+            const modalCloseButton = document.getElementById("modal-close");
+
+            // --- UI FUNCTIONS ---
+            function showMessage(title, text) {
+                modalTitle.textContent = title;
+                modalText.textContent = text;
+                modal.classList.remove("hidden");
+            }
+
+            function hideMessage() {
+                modal.classList.add("hidden");
+            }
+            
+            // Fill the reels with symbols for the spinning effect.
+            function initializeReels() {
+                reelsContainer.forEach(reel => {
+                    reel.innerHTML = '';
+                    // Create a long sequence of symbols for the spinning effect.
+                    const spinSymbols = new Array(numberOfSpins).fill(symbols).flat();
+                    spinSymbols.forEach(symbol => {
+                        const span = document.createElement('span');
+                        span.className = 'symbol';
+                        span.textContent = symbol;
+                        reel.appendChild(span);
+                    });
+                });
+            }
+
+            // Function to update the contract balance display.
+            async function updateBalance() {
+                try {
+                    const balance = await provider.getBalance(contractAddress);
+                    contractBalanceEl.textContent = `Contract Balance: ${ethers.utils.formatEther(balance)} ETH`;
+                } catch (error) {
+                    console.error("Failed to fetch contract balance:", error);
+                    contractBalanceEl.textContent = "Contract Balance: Error";
+                }
+            }
+
+            // --- EVENT LISTENERS ---
+            modalCloseButton.addEventListener("click", hideMessage);
+
+            // Connect to a wallet and initialize provider/signer/contract.
+            async function connectWallet() {
+                if (typeof window.ethereum === 'undefined') {
+                    showMessage("Error", "Please install MetaMask or another Ethereum wallet.");
+                    return;
+                }
+
+                try {
+                    await window.ethereum.request({ method: 'eth_requestAccounts' });
+
+                    provider = new ethers.providers.Web3Provider(window.ethereum);
+                    signer = provider.getSigner();
+                    contract = new ethers.Contract(contractAddress, contractABI, signer);
+
+                    const contractOwner = await contract.owner();
+                    const userAddress = await signer.getAddress();
+                    if (userAddress.toLowerCase() === contractOwner.toLowerCase()) {
+                        ownerControls.classList.remove("hidden");
+                    }
+                    
+                    updateBalance();
+                    initializeReels();
+                    
+                    contract.on("SpinResult", async (player, r1, r2, r3, payoutAmount) => {
+                        const userAddress = await signer.getAddress();
+                        if (player.toLowerCase() === userAddress.toLowerCase()) {
+                            // Stop the spinning animation and show final results.
+                            reelsContainer.forEach(reel => reel.style.transition = 'transform 2s cubic-bezier(0.19, 1, 0.22, 1)');
+                            reelsContainer[0].style.transform = `translateY(-${(numberOfSpins + r1) * 4.5}rem)`;
+                            reelsContainer[1].style.transform = `translateY(-${(numberOfSpins + r2) * 4.5}rem)`;
+                            reelsContainer[2].style.transform = `translateY(-${(numberOfSpins + r3) * 4.5}rem)`;
+                            
+                            // A small delay to let the animation finish before showing the result.
+                            setTimeout(async () => {
+                                let message = "Better luck next time! You didn't win this time.";
+                                let title = "No Win";
+
+                                if (payoutAmount.gt(0)) {
+                                    title = "Congratulations!";
+                                    const payoutInEth = ethers.utils.formatEther(payoutAmount);
+                                    
+                                    // Check for specific winning combinations
+                                    if (payoutAmount.eq(PAYOUTS.three_sevens)) {
+                                        message = `JACKPOT! Three ${symbols[4]}s! You won ${payoutInEth} ETH!`;
+                                    } else if (payoutAmount.eq(PAYOUTS.three_diamond)) {
+                                        message = `Three ${symbols[2]}s! You won ${payoutInEth} ETH!`;
+                                    } else if (payoutAmount.eq(PAYOUTS.three_lemon)) {
+                                        message = `Three ${symbols[1]}s! You won ${payoutInEth} ETH!`;
+                                    } else if (payoutAmount.eq(PAYOUTS.three_bell)) {
+                                        message = `Three ${symbols[3]}s! You won ${payoutInEth} ETH!`;
+                                    } else if (payoutAmount.eq(PAYOUTS.three_cherry)) {
+                                        message = `Three ${symbols[0]}s! You won ${payoutInEth} ETH!`;
+                                    } else if (payoutAmount.eq(PAYOUTS.two_any)) {
+                                        message = `Two matching symbols! You won ${payoutInEth} ETH!`;
+                                    }
+                                }
+
+                                showMessage(title, message);
+                                await updateBalance();
+                            }, 2500);
+                        }
+                    });
+
+                    contract.on("Fund", async () => { await updateBalance(); });
+                    contract.on("Withdrawal", async () => { await updateBalance(); });
+
+                } catch (error) {
+                    console.error("Wallet connection failed:", error);
+                    showMessage("Connection Error", "Failed to connect to your wallet. Please check your browser console for details.");
+                }
+            }
+
+            // --- BUTTON HANDLERS ---
+            playButton.addEventListener("click", async () => {
+                // New check for a connected signer
+                if (!signer) {
+                    showMessage("Connection Required", "Please connect your wallet to play.");
+                    return;
+                }
+
+                if (!contract) { showMessage("Error", "Please connect your wallet first."); return; }
+                statusMessage.textContent = "Spinning...";
+                reelsContainer.forEach(reel => {
+                    reel.style.transition = 'none';
+                    reel.style.transform = 'translateY(0)';
+                });
+                void reelsContainer[0].offsetWidth; 
+                reelsContainer.forEach(reel => reel.style.transition = `transform ${1.5 + Math.random()}s cubic-bezier(0.19, 1, 0.22, 1)`);
+                reelsContainer.forEach(reel => reel.style.transform = `translateY(-${numberOfSpins * 4.5}rem)`);
+
+                try {
+                    const tx = await contract.play({ value: ethers.utils.parseEther("0.001") });
+                    statusMessage.textContent = "Transaction sent, waiting for result...";
+                    await tx.wait();
+                } catch (error) {
+                    console.error("Play failed:", error);
+                    statusMessage.textContent = "Failed to play. See console for details.";
+                    showMessage("Transaction Failed", error.reason || "There was an error processing your transaction.");
+                }
+            });
+
+            fundButton.addEventListener("click", async () => {
+                // New check for a connected signer
+                if (!signer) {
+                    showMessage("Connection Required", "Please connect your wallet to fund the contract.");
+                    return;
+                }
+                
+                if (!contract) { showMessage("Error", "Please connect your wallet first."); return; }
+                const amountInput = document.getElementById("fund-amount").value;
+                if (!amountInput || amountInput <= 0) { showMessage("Invalid Amount", "Please enter a valid amount greater than zero."); return; }
+                try {
+                    const tx = await contract.fundContract({ value: ethers.utils.parseEther(amountInput) });
+                    statusMessage.textContent = "Funding transaction sent, please wait...";
+                    await tx.wait();
+                    statusMessage.textContent = "Contract successfully funded!";
+                } catch (error) {
+                    console.error("Funding failed:", error);
+                    statusMessage.textContent = "Failed to fund contract. See console for details.";
+                    showMessage("Transaction Failed", error.reason || "There was an error processing your transaction.");
+                }
+            });
+
+            withdrawButton.addEventListener("click", async () => {
+                if (!contract) { showMessage("Error", "Please connect your wallet first."); return; }
+                try {
+                    const tx = await contract.withdrawAll();
+                    statusMessage.textContent = "Withdrawal transaction sent, please wait...";
+                    await tx.wait();
+                    statusMessage.textContent = "All funds successfully withdrawn!";
+                } catch (error) {
+                    console.error("Withdrawal failed:", error);
+                    statusMessage.textContent = "Failed to withdraw funds. See console for details.";
+                    showMessage("Transaction Failed", error.reason || "There was an error processing your transaction.");
+                }
+            });
+
+            // Initialize the app on page load.
+            await connectWallet();
+        })();
+    </script>
+
+</body>
+</html>
 
